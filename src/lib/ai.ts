@@ -1,5 +1,6 @@
 // الذكاء الاصطناعي: كل طلب بينطلق من جهاز الطفل لمفتاح ولي الأمر مباشرة —
 // ما في سيرفر بيشوف الصور، ولا مفتاح مشترك بين الناس.
+import { bumpUsage } from './usage.ts'
 import type { QuizItem, Spot, Student, Memory } from './store.ts'
 import { learningStyle, memoryBrief, subjectReads } from './store.ts'
 import { COMPS } from './companions.ts'
@@ -155,6 +156,7 @@ async function postGenerate(
 }
 
 async function callJson(apiKey: string, parts: unknown[], temperature: number): Promise<Result<Record<string, unknown>>> {
+  bumpUsage()
   const key = apiKey.trim()
   if (key === '') return { ok: false, error: NO_KEY }
 
@@ -602,4 +604,93 @@ export async function chatTurn(input: {
   const reply = str(res.data.reply)
   if (reply === '') return { ok: false, error: 'ما قدرت أرد هلق. جرّب مرة تانية.' }
   return { ok: true, data: { heard: str(res.data.heard), reply } }
+}
+
+export async function storyFromLesson(input: {
+  apiKey: string
+  settings: Settings
+  memory: Memory
+  lessonTitle: string
+  facts: string
+}): Promise<Result<string>> {
+  const { apiKey, settings, memory, lessonTitle, facts } = input
+  const prompt = [
+    persona(settings, memory),
+    `اكتب قصة قصيرة من ٥ جمل بالشامي (لهجة الشارع) عن بطل طفل بيحل مشكلة، وفكرة الدرس "${lessonTitle}" جوّا القصة.`,
+    `المعلومات الصحيحة (للتأكد بس، ما تنسخها): ${facts}`,
+    'القصة لازم تكون صحيحة علمياً، ولطيفة، ومناسبة للأطفال. بدون عنف ولا كلام مو مناسب.',
+    'رجّع JSON فقط: {"story":"..."}',
+  ].join('\n')
+  const res = await callJson(apiKey, [{ text: prompt }], 0.8)
+  if (!res.ok) return res
+  const story = str(res.data.story)
+  if (story === '') return { ok: false, error: 'ما قدرت أكتب القصة هلق. جرّب مرة تانية.' }
+  return { ok: true, data: story }
+}
+
+export interface PodcastLine {
+  speaker: 'buddy' | 'friend'
+  text: string
+}
+
+/** بودكاست الدرس: حوار قصير بين الرفيق وصديقو. الأسطر بتنقرا بصوتين. */
+export async function podcastScript(input: {
+  apiKey: string
+  settings: Settings
+  memory: Memory
+  lessonTitle: string
+  facts: string
+}): Promise<Result<PodcastLine[]>> {
+  const { apiKey, settings, memory, lessonTitle, facts } = input
+  const prompt = [
+    persona(settings, memory),
+    `اكتب حوار قصير بين رفيق الطالب (speaker: "buddy") وصديقو الفضولي (speaker: "friend") عن درس "${lessonTitle}".`,
+    'الحوار ٦ إلى ٨ أسطر بالشامي. الرفيق بيشرح، والصديق بيسأل ويستغرب. آخر سطر سؤال بيخلّي الطالب يفكّر.',
+    `المعلومات الصحيحة (لا تضيف معلومات من برا الدرس): ${facts}`,
+    'رجّع JSON فقط: {"lines":[{"speaker":"buddy","text":"..."},{"speaker":"friend","text":"..."}]}',
+  ].join('\n')
+  const res = await callJson(apiKey, [{ text: prompt }], 0.7)
+  if (!res.ok) return res
+  const raw = Array.isArray(res.data.lines) ? res.data.lines : []
+  const lines: PodcastLine[] = []
+  for (const l of raw) {
+    if (!l || typeof l !== 'object') continue
+    const o = l as Record<string, unknown>
+    const text = str(o.text)
+    if (text === '') continue
+    lines.push({ speaker: o.speaker === 'friend' ? 'friend' : 'buddy', text })
+    if (lines.length === 10) break
+  }
+  if (lines.length < 2) return { ok: false, error: 'ما قدرت أكتب البودكاست هلق. جرّب مرة تانية.' }
+  return { ok: true, data: lines }
+}
+
+export interface BookAnswer {
+  answer: string
+  lesson: string
+}
+
+/** اسأل الكتاب: الجواب من مقاطع الكتاب بس، ويقول وين بالكتاب. */
+export async function askBook(input: {
+  apiKey: string
+  settings: Settings
+  memory: Memory
+  question: string
+  pages: Array<{ title: string; facts: string }>
+}): Promise<Result<BookAnswer>> {
+  const { apiKey, settings, memory, question, pages } = input
+  const context = pages.map((p, i) => `(${i + 1}) درس "${p.title}": ${p.facts}`).join('\n')
+  const prompt = [
+    persona(settings, memory),
+    `الطالب بيسأل سؤال عن الكتاب: "${question}"`,
+    `جاوب بالشامي بناءً على المقاطع التالية فقط، واذكر اسم الدرس اللي فيه الجواب (lesson).`,
+    'إذا السؤال ما إلو جواب بالمقاطع، قول بلطف: "هاد مو موجود بالدروس اللي عندي، اسأل الأستاذ أو شوف الكتاب بنفسك." ولا تضيف معلومات من برا المقاطع.',
+    `المقاطع:\n${context}`,
+    'رجّع JSON فقط: {"answer":"...","lesson":"..."}',
+  ].join('\n')
+  const res = await callJson(apiKey, [{ text: prompt }], 0.3)
+  if (!res.ok) return res
+  const answer = str(res.data.answer)
+  if (answer === '') return { ok: false, error: 'ما قدرت أجاوب هلق. جرّب مرة تانية.' }
+  return { ok: true, data: { answer, lesson: str(res.data.lesson) } }
 }

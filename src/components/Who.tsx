@@ -5,18 +5,14 @@ import { Avatar, Companion, Icon } from './ui.tsx'
 /** مين عم يدرس اليوم؟ */
 export default function Who({
   students,
-  paired,
   onPick,
   onAdd,
   onParent,
-  onPair,
 }: {
   students: Student[]
-  paired: boolean
   onPick: (id: string) => void
   onAdd: () => void
   onParent: () => void
-  onPair: () => void
 }) {
   return (
     <main className="screen paper who">
@@ -42,15 +38,6 @@ export default function Who({
         </button>
       </div>
       <div className="foot col">
-        {paired ? (
-          <span className="sync">
-            <Icon name="cloud" size={16} sw={2.4} /> مربوط بجهاز الأهل
-          </span>
-        ) : (
-          <button type="button" className="btn ghost small" onClick={onPair}>
-            <Icon name="cloud" size={20} /> اربط بجهاز الأهل
-          </button>
-        )}
         <button type="button" className="btn ghost small" onClick={onParent}>
           <Icon name="lock" size={20} /> قسم الأهل
         </button>

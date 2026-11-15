@@ -7,13 +7,14 @@ import type { NotifyPrefs } from '../lib/notify.ts'
 import { learningStyle, reportText, subjectReads, weekDays } from '../lib/store.ts'
 import type { Book, Memory, Progress, Student, TodaySummary } from '../lib/store.ts'
 import { speakNatural, stopNatural, VOICES, primeVoice } from '../lib/tts.ts'
-import type { CloudState } from '../lib/sync.ts'
 import type { UpdateInfo } from '../lib/update.ts'
 import { BookForm } from './forms.tsx'
 import { AboutPanel, UpdateBanner } from './UpdateBanner.tsx'
+import { openExternal } from '../lib/external.ts'
+import { getUsage } from '../lib/usage.ts'
 import { AR, Avatar, Icon, dayLabel } from './ui.tsx'
 
-/** طالب بعيون ولي الأمر: محلي (على هالجهاز) أو جاي من Firebase. */
+/** طالب بعيون ولي الأمر (على هالجهاز). */
 export interface KidView {
   student: Student
   progress: Progress
@@ -28,8 +29,6 @@ interface Props {
   selected: string
   deviceMode: 'student' | 'parent'
   apiKey: string
-  cloud: CloudState
-  cloudErr: string
   notify: NotifyPrefs
   onSelect: (id: string) => void
   onBack: () => void
@@ -43,10 +42,6 @@ interface Props {
   onAddStudent: () => void
   onChangePin: () => void
   onNotify: (p: NotifyPrefs) => void
-  onConnect: (configText: string, email: string, pass: string) => Promise<string>
-  onPair: () => Promise<{ ok: boolean; text: string }>
-  onJoin: (text: string) => Promise<string>
-  onDisconnect: () => void
   onNarrative: (k: KidView, facts: string) => Promise<{ ok: boolean; text: string }>
   onInsight: (k: KidView) => Promise<{ ok: boolean; text: string }>
   onBookAdd: (kidId: string, title: string, subject: string) => Promise<string>
@@ -260,10 +255,14 @@ function BackupSection({ kid, p }: { kid?: KidView; p: Props }) {
 }
 
 function KeySection({ apiKey, onSave }: { apiKey: string; onSave: (k: string) => void }) {
-  const [key, setKey] = useState(apiKey)
+  const [key, setKey] = useState('')
+  const [edit, setEdit] = useState(apiKey === '')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [ok, setOk] = useState(false)
+  const usage = getUsage()
+  const masked = apiKey.length > 4 ? `${'•'.repeat(14)}${apiKey.slice(-4)}` : ''
+
   const test = async () => {
     setBusy(true)
     setMsg('')
@@ -276,45 +275,88 @@ function KeySection({ apiKey, onSave }: { apiKey: string; onSave: (k: string) =>
     }
     onSave(key.trim())
     setOk(true)
+    setEdit(false)
+    setKey('')
     setMsg(`المفتاح شغّال (${res.data}) وانحفظ على هالجهاز.`)
   }
+
   return (
     <section className="panel">
       <h3>
         <Icon name="key" size={22} /> مفتاح جيميني المجاني
       </h3>
-      <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
-        للبحث وقراءة الصفحات وصوت الرفيق. من Google AI Studio، وبيضل على هالجهاز بس.
-      </p>
-      <input className="input ltr" value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza..." autoComplete="off" />
-      {msg && (
-        <p className={ok ? 'ok' : 'error'} role="status">
-          {msg}
-        </p>
-      )}
-      <div className="row">
-        <button type="button" className="btn mint grow" disabled={busy || key.trim().length < 20} onClick={() => void test()}>
-          {busy ? 'عم نفحص…' : 'افحص واحفظ'}
-        </button>
-        {apiKey !== '' && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              onSave('')
-              setKey('')
-              setMsg('انمسح المفتاح.')
-              setOk(true)
-            }}
-          >
-            امسح
+      {!edit && apiKey !== '' ? (
+        <>
+          <div className="report" aria-label="المفتاح محفوظ" style={{ textAlign: 'center', direction: 'ltr', letterSpacing: 2, fontWeight: 800 }}>
+            {masked}
+          </div>
+          <p className="muted bold" style={{ margin: 0 }}>
+            طلبات اليوم من هالتلفون: {AR(usage.count)} (تقريبي، بيحسب طلبات هالتطبيق بس)
+          </p>
+          <button type="button" className="btn small" onClick={() => openExternal('https://ai.google.dev/gemini-api/docs/rate-limits')}>
+            شو هي الحدود المجانية؟
           </button>
-        )}
-      </div>
+          <div className="row">
+            <button type="button" className="btn small grow" onClick={() => setEdit(true)}>
+              غيّر المفتاح
+            </button>
+            <button
+              type="button"
+              className="btn small ghost"
+              onClick={() => {
+                onSave('')
+                setKey('')
+                setEdit(true)
+                setMsg('انمسح المفتاح.')
+                setOk(true)
+              }}
+            >
+              امسح المفتاح
+            </button>
+          </div>
+          {msg && (
+            <p className={ok ? 'ok' : 'error'} role="status">
+              {msg}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
+            للبحث وقراءة الصفحات والصوت والمحادثة. من Google AI Studio، وبيضل على هالجهاز بس.
+          </p>
+          <div className="warn-box" role="note">
+            <b>قبل ما تحطو المفتاح:</b>
+            <ul>
+              <li>المفتاح مجاني من جوجل، وله حد بالدقيقة وباليوم. إذا وصل الحد، الميزات الذكية بتوقف لحد بكرا.</li>
+              <li>جوجل ممكن تستعمل الطلبات (صور الصفحات والكلام والأسئلة) لتحسين منتجاتها، حسب شروط المفتاح المجاني.</li>
+              <li>إذا ما بدك تطلع الصور والكلام لجوجل، ما تحط المفتاح. التطبيق بيضل شغّال بالكتب والنجوم والمهمّات.</li>
+            </ul>
+          </div>
+          <button type="button" className="btn small" onClick={() => openExternal('https://aistudio.google.com/app/apikey')}>
+            اعمل مفتاح جديد من Google AI Studio (مجاني)
+          </button>
+          <input className="input ltr" value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza..." autoComplete="off" aria-label="المفتاح" />
+          {msg && (
+            <p className={ok ? 'ok' : 'error'} role="status">
+              {msg}
+            </p>
+          )}
+          <div className="row">
+            <button type="button" className="btn mint grow" disabled={busy || key.trim().length < 20} onClick={() => void test()}>
+              {busy ? 'عم نفحص…' : 'افحص واحفظ'}
+            </button>
+            {apiKey !== '' && (
+              <button type="button" className="btn" onClick={() => setEdit(false)}>
+                إلغاء
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </section>
   )
 }
-
 function HomeworkSection({ kid, onSend }: { kid: KidView; onSend: (id: string, msg: string, photo: string) => Promise<string> }) {
   const [msg, setMsg] = useState('')
   const [photo, setPhoto] = useState('')
@@ -368,116 +410,6 @@ function HomeworkSection({ kid, onSend }: { kid: KidView; onSend: (id: string, m
   )
 }
 
-function CloudSection(p: Pick<Props, 'cloud' | 'cloudErr' | 'deviceMode' | 'onConnect' | 'onPair' | 'onJoin' | 'onDisconnect'>) {
-  const { cloud, deviceMode } = p
-  const [cfg, setCfg] = useState('')
-  const [email, setEmail] = useState(cloud.email)
-  const [pass, setPass] = useState('')
-  const [pairText, setPairText] = useState('')
-  const [joinText, setJoinText] = useState('')
-  const [msg, setMsg] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const run = async (fn: () => Promise<string>) => {
-    setBusy(true)
-    setMsg('')
-    const err = await fn()
-    setBusy(false)
-    if (err !== '') setMsg(err)
-  }
-
-  return (
-    <section className="panel">
-      <h3>
-        <Icon name="cloud" size={22} /> ربط الأهل مع الطالب (Firebase)
-      </h3>
-      {deviceMode === 'parent' ? (
-        cloud.role === 'parent' ? (
-          <>
-            <p className="ok">مسجّل دخول: {cloud.email}</p>
-            <button
-              type="button"
-              className="btn yellow"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const r = await p.onPair()
-                  if (r.ok) setPairText(r.text)
-                  return r.ok ? '' : r.text
-                })
-              }
-            >
-              اعمل كود ربط لجهاز طالب
-            </button>
-            {pairText !== '' && (
-              <>
-                <div className="pair-code" aria-label="كود الربط" onClick={() => void navigator.clipboard?.writeText(pairText)}>
-                  {pairText}
-                </div>
-                <button type="button" className="btn small" onClick={() => void navigator.clipboard?.writeText(pairText)}>
-                  <Icon name="copy" size={20} /> انسخ الكود
-                </button>
-                <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-                  اكتبو بجهاز الطالب من «ربط الأهل مع الطالب». صالح ١٠ دقايق.
-                </p>
-              </>
-            )}
-            <button type="button" className="btn ghost small" onClick={p.onDisconnect}>
-              افصل هالجهاز
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
-              سجّل دخول بإيميلك وكلمة سر. أول مرة بينعمل الحساب. بعدين اعمل كود ربط لجهاز الطالب.
-            </p>
-            <details>
-              <summary className="muted bold" style={{ cursor: 'pointer' }}>مشروع Firebase خاص (متقدم)</summary>
-              <textarea className="input ltr area" value={cfg} onChange={(e) => setCfg(e.target.value)} placeholder={'{ apiKey: "...", projectId: "...", appId: "..." }'} />
-            </details>
-            <input className="input ltr" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" autoComplete="off" />
-            <input className="input ltr" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="كلمة السر (٦ خانات على الأقل)" autoComplete="off" />
-            <button type="button" className="btn yellow" disabled={busy || email.trim() === '' || pass.length < 6} onClick={() => void run(() => p.onConnect(cfg, email.trim(), pass))}>
-              {busy ? '…' : 'سجّل دخول'}
-            </button>
-          </>
-        )
-      ) : cloud.role === 'device' ? (
-        <>
-          <p className="ok">هالجهاز مربوط بجهاز الأهل.</p>
-          <button type="button" className="btn ghost small" onClick={p.onDisconnect}>
-            افصل الربط
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
-            اكتب الكود اللي طلع بجهاز الأهل (٨ خانات). صالح ١٠ دقايق.
-          </p>
-          <input
-            className="input ltr"
-            value={joinText}
-            onChange={(e) => setJoinText(e.target.value.toUpperCase())}
-            placeholder="K7P3QX9D"
-            maxLength={20}
-            autoCapitalize="characters"
-            autoComplete="off"
-            aria-label="كود الربط"
-          />
-          <button type="button" className="btn yellow" disabled={busy || joinText.trim() === ''} onClick={() => void run(() => p.onJoin(joinText))}>
-            {busy ? '…' : 'اربط'}
-          </button>
-        </>
-      )}
-      {(msg || p.cloudErr) && (
-        <p className="error" role="alert">
-          {msg || p.cloudErr}
-        </p>
-      )}
-    </section>
-  )
-}
-
 const HOURS = [-1, 16, 17, 18, 19]
 
 /** قسم الأهل: التقدم، الذاكرة، التقرير، التحكم، الواجبات، والربط. */
@@ -500,9 +432,6 @@ export default function Parent(p: Props) {
       <h1 className="display" style={{ margin: 0, fontSize: 28, flex: 1 }}>
         قسم الأهل
       </h1>
-      <span className="sync">
-        <Icon name="cloud" size={15} sw={2.4} /> {p.cloud.role !== '' ? 'مربوط' : 'محلي'}
-      </span>
     </div>
   )
 
@@ -517,8 +446,7 @@ export default function Parent(p: Props) {
               <Icon name="plus" size={22} sw={2.6} /> أضف طالب
             </button>
           )}
-          <CloudSection {...p} />
-          <BackupSection p={p} />
+                    <BackupSection p={p} />
           <KeySection apiKey={p.apiKey} onSave={p.onSaveKey} />
         </div>
       </main>
@@ -838,8 +766,7 @@ export default function Parent(p: Props) {
           {notifyMsg && <p className="error" role="status">{notifyMsg}</p>}
         </section>
 
-        <CloudSection {...p} />
-
+        
         <BackupSection kid={kid} p={p} />
 
         <AboutPanel onCheck={p.onCheckUpdate} />

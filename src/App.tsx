@@ -4,7 +4,6 @@ import { Capacitor } from '@capacitor/core'
 import { learningInsight, weeklyNarrative } from './lib/ai.ts'
 import type { LessonDraft } from './lib/ai.ts'
 import { removeImage } from './lib/archive.ts'
-import { COMPS } from './lib/companions.ts'
 import { applyNotify, loadNotify } from './lib/notify.ts'
 import type { NotifyPrefs } from './lib/notify.ts'
 import { SUBJECT_COLOR, claimMissions, itemName, nextAchievement, nextSticker } from './lib/rewards.ts'
@@ -49,26 +48,7 @@ import {
   weekStartKey,
 } from './lib/store.ts'
 import type { Book, Device, Homework, Lesson, Memory, ParentData, Progress, ReviewSeed, SignalKind, Student } from './lib/store.ts'
-import {
-  clearCloud,
-  connectParent,
-  createPairing,
-  joinWithString,
-  loadCloud,
-  markHomeworkDone,
-  parseConfig,
-  pushKid,
-  pushSettings,
-  sendHomework,
-  sendOp,
-  deleteOp,
-  watchHomework,
-  watchKids,
-  watchOps,
-  watchSettings,
-} from './lib/sync.ts'
-import type { BookOp, CloudKid, CloudSettings, CloudState } from './lib/sync.ts'
-import { connectBuiltIn } from './lib/sync.ts'
+
 import { applyBackup, exportStudent, parseBackup } from './lib/backup.ts'
 import { checkUpdate, updateLater } from './lib/update.ts'
 import type { UpdateInfo } from './lib/update.ts'
@@ -142,9 +122,7 @@ function initialView(): View {
   const d = loadDevice()
   const par = loadParent()
   const list = loadStudents()
-  if (d.mode === '') return { k: 'welcome' }
   if (!hasPin(par)) return { k: 'setup', start: 'pin' }
-  if (d.mode === 'parent') return { k: 'locked' }
   if (list.length === 0) return { k: 'setup', start: 'student' }
   return list.some((s) => s.id === d.active) ? { k: 'desk' } : { k: 'who' }
 }
@@ -169,15 +147,10 @@ function newLesson(draft: LessonDraft, bookId: string, imageId: string): Lesson 
   }
 }
 
-function mergeHw(local: Homework[], remote: Homework[]): Homework[] {
-  const map = new Map<string, Homework>()
-  for (const h of local) map.set(h.id, h)
-  for (const r of remote) {
-    const cur = map.get(r.id)
-    map.set(r.id, cur ? { ...cur, done: cur.done || r.done } : r)
-  }
-  return [...map.values()].sort((a, b) => b.ts - a.ts).slice(0, 20)
-}
+type BookOp =
+  | { type: 'addBook'; book: { id: string; title: string; subject: string } }
+  | { type: 'archiveBook'; bookId: string; archived: boolean }
+  | { type: 'deleteBook'; bookId: string }
 
 const FREE_BOOK = { id: '', title: 'أسئلتي', subject: 'سؤال', color: '#FFE36E' }
 
@@ -207,10 +180,6 @@ export default function App() {
   const [sheet, setSheet] = useState<SheetKind | null>(null)
   const [pinFlow, setPinFlow] = useState<PinFlow | null>(null)
   const [session, setSession] = useState(0)
-  const [cloud, setCloud] = useState<CloudState>(loadCloud)
-  const [cloudKids, setCloudKids] = useState<CloudKid[]>([])
-  const [cloudErr, setCloudErr] = useState('')
-  const [overrides, setOverrides] = useState<Record<string, Partial<Student>>>({})
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [importPlan, setImportPlan] = useState<{ b: ParsedBackup; exists: boolean } | null>(null)
   const [pkid, setPkid] = useState('')
@@ -257,7 +226,7 @@ export default function App() {
 
   // فحص تحديث جديد عند فتح التطبيق (مرة كل ١٢ ساعة): بيطلع بانر عند الطالب وعند الأهل.
   useEffect(() => {
-    void checkUpdate(false).then((r) => {
+    void checkUpdate(true).then((r) => {
       if (r.ok) setUpdate(r.info)
     })
   }, [])
@@ -280,39 +249,6 @@ export default function App() {
     document.documentElement.setAttribute('data-skin', skin)
   }, [view.k, student])
 
-  // ---- مزامنة Firebase (اختيارية) ----
-  useEffect(() => {
-    if (cloud.role !== 'device' || !student) return
-    const t = window.setTimeout(
-      () => void pushKid(cloud, student, data.progress, data.memory, data.books, todaySummary(data.lessons, data.memory, data.progress)),
-      1500,
-    )
-    return () => window.clearTimeout(t)
-  }, [cloud, student, data.progress, data.memory, data.books, data.lessons])
-
-  useEffect(() => {
-    if (cloud.role !== 'device' || active === '') return
-    const a = watchSettings(cloud, active, (s) => setStudents((prev) => prev.map((st) => (st.id === active ? { ...st, ...s } : st))))
-    const b = watchHomework(cloud, active, (list) => setData((d) => ({ ...d, hw: mergeHw(d.hw, list) })))
-    // أوامر الأهل للكتب (إضافة/أرشفة/حذف): بتتنفّذ وبتتمسح.
-    const c = watchOps(cloud, active, (list) => {
-      if (list.length === 0) return
-      setData((d) => list.reduce((acc, x) => applyBookOp(acc, x.op), d))
-      for (const x of list) void deleteOp(cloud, active, x.id)
-    })
-    return () => {
-      a()
-      b()
-      c()
-    }
-  }, [cloud, active])
-
-  useEffect(() => {
-    if (device.mode !== 'parent' || cloud.role !== 'parent' || view.k !== 'parent') return
-    setCloudErr('')
-    return watchKids(cloud, setCloudKids, setCloudErr)
-  }, [device.mode, cloud, view.k])
-
   // ---- مساعدات ----
   const updateStudent = (id: string, patch: Partial<Student>) =>
     setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)))
@@ -320,31 +256,18 @@ export default function App() {
   /** تعديل إعدادات طالب: محلي، وبيتزامن مع الجهاز التاني إذا مربوطين. */
   const patchStudent = (id: string, patch: Partial<Student>) => {
     updateStudent(id, patch)
-    if (device.mode === 'parent') setOverrides((o) => ({ ...o, [id]: { ...o[id], ...patch } }))
-    if (cloud.role === '') return
-    const cs: Partial<CloudSettings> = {}
-    if (patch.limitMin !== undefined) cs.limitMin = patch.limitMin
-    if (patch.canEdit !== undefined) cs.canEdit = patch.canEdit
-    if (patch.goal !== undefined) cs.goal = patch.goal
-    if (patch.starCap !== undefined) cs.starCap = patch.starCap
-    if (Object.keys(cs).length > 0) void pushSettings(cloud, id, cs)
   }
 
-  /** الكتب بإدارة الأهل: محلي مباشرة، أو أمر عبر Firebase لجهاز الطالب. */
+  /** الكتب بإدارة الأهل: بتتعدّل محلياً على هالجهاز. */
   const bookOp = async (kidId: string, op: BookOp): Promise<string> => {
-    if (device.mode !== 'parent') {
-      if (kidId === active) setData((d) => applyBookOp(d, op))
-      else {
-        const nd = applyBookOp(loadAll(kidId), op)
-        saveBooks(kidId, nd.books)
-        saveLessons(kidId, nd.lessons)
-      }
-      return ''
+    if (kidId === active) setData((d) => applyBookOp(d, op))
+    else {
+      const nd = applyBookOp(loadAll(kidId), op)
+      saveBooks(kidId, nd.books)
+      saveLessons(kidId, nd.lessons)
     }
-    const r = await sendOp(cloud, kidId, op)
-    return r.ok ? '' : r.error
+    return ''
   }
-
   const askAddBook = () =>
     student?.canEdit ? setSheet({ k: 'addbook' }) : setPinFlow({ k: 'verify', then: () => setSheet({ k: 'addbook' }) })
 
@@ -477,46 +400,12 @@ export default function App() {
       progress: { ...d.progress, covers: { ...d.progress.covers, [bookId]: { ...d.progress.covers[bookId], ...patch } } },
     }))
 
-  const pushAll = (state: CloudState) => {
-    for (const s of students) {
-      const d = s.id === active ? data : loadAll(s.id)
-      void pushKid(state, s, d.progress, d.memory, d.books, todaySummary(d.lessons, d.memory, d.progress))
-    }
-  }
-
   const localKid = (s: Student): KidView => {
     const d = s.id === active ? data : loadAll(s.id)
     return { student: s, progress: d.progress, memory: d.memory, local: true, books: d.books, today: todaySummary(d.lessons, d.memory, d.progress) }
   }
 
-  const kids: KidView[] =
-    view.k !== 'parent'
-      ? []
-      : device.mode === 'parent'
-      ? cloudKids.map((k) => ({
-          student: {
-            id: k.id,
-            name: k.profile.name,
-            grade: k.profile.grade,
-            gender: k.profile.gender,
-            av: k.profile.av,
-            comp: k.profile.comp,
-            skin: k.profile.skin,
-            acc: k.profile.acc ?? {},
-            voice: COMPS[k.profile.comp]?.voice ?? 'Puck',
-            limitMin: k.limitMin ?? 0,
-            goal: k.goal ?? 3,
-            canEdit: k.canEdit ?? false,
-            starCap: k.starCap ?? 3,
-            ...overrides[k.id],
-          },
-          progress: { ...DEFAULT_PROGRESS, ...k.progress, covers: {} },
-          memory: { ...DEFAULT_MEMORY, ...k.memory, insight: '', insightAt: 0, interests: [], notes: '' },
-          local: false,
-          books: (k.books ?? []).map((b) => ({ id: b.id, title: b.title, subject: b.subject, createdAt: 0, archived: b.archived })),
-          today: k.today && k.today.day === todayKey() ? k.today : { day: todayKey(), lessons: [], minutes: 0, teach: 0, read: 0 },
-        }))
-      : students.map(localKid)
+  const kids: KidView[] = view.k !== 'parent' ? [] : students.map(localKid)
 
   // ---- زر الرجوع بالتلفون ----
   const backRef = useRef<() => void>(() => undefined)
@@ -573,18 +462,12 @@ export default function App() {
       selected={pkid}
       deviceMode={device.mode === 'parent' ? 'parent' : 'student'}
       apiKey={apiKey}
-      cloud={cloud}
-      cloudErr={cloudErr}
       notify={notify}
       onSelect={setPkid}
       onBack={() => backRef.current()}
       onSetLimit={(id, min) => patchStudent(id, { limitMin: min })}
       onSendHw={async (id, msg, photo) => {
         const hw: Homework = { id: uid(), msg, photo, ts: Date.now(), done: false }
-        if (cloud.role === 'parent') {
-          const r = await sendHomework(cloud, id, hw)
-          return r.ok ? '' : r.error
-        }
         if (id === active) setData((d) => ({ ...d, hw: [hw, ...d.hw].slice(0, 20) }))
         else saveHomework(id, [hw, ...loadHomework(id)])
         return ''
@@ -617,36 +500,6 @@ export default function App() {
       onNotify={(n) => {
         setNotify(n)
         void applyNotify(n)
-      }}
-      onConnect={async (text, email, pass) => {
-        if (text.trim() === '') {
-          const r = await connectBuiltIn(email, pass)
-          if (!r.ok) return r.error
-          setCloud(r.data)
-          return ''
-        }
-        const cfg = parseConfig(text)
-        if (!cfg) return 'ما قدرنا نقرا إعدادات Firebase. انسخ firebaseConfig كامل (apiKey وprojectId وappId).'
-        const r = await connectParent(cfg, email, pass)
-        if (!r.ok) return r.error
-        setCloud(r.data)
-        return ''
-      }}
-      onPair={async () => {
-        const r = await createPairing(cloud)
-        return { ok: r.ok, text: r.ok ? r.data : r.error }
-      }}
-      onJoin={async (text) => {
-        const r = await joinWithString(text)
-        if (!r.ok) return r.error
-        setCloud(r.data)
-        pushAll(r.data)
-        return ''
-      }}
-      onDisconnect={() => {
-        clearCloud()
-        setCloud({ config: null, fid: '', role: '', email: '' })
-        setCloudKids([])
       }}
       onNarrative={async (k, facts) => {
         const r = await weeklyNarrative({
@@ -720,11 +573,9 @@ export default function App() {
     screen = (
       <Who
         students={students}
-        paired={cloud.role === 'device'}
         onPick={openStudent}
         onAdd={() => setPinFlow({ k: 'verify', then: () => setSheet({ k: 'addstudent' }) })}
         onParent={enterParent}
-        onPair={enterParent}
       />
     )
   } else if (view.k === 'book' && book) {
@@ -879,8 +730,7 @@ export default function App() {
         items={hwPending}
         onDone={(id) => {
           setData((d) => ({ ...d, hw: d.hw.map((h) => (h.id === id ? { ...h, done: true } : h)) }))
-          void markHomeworkDone(cloud, active, id)
-          if (hwPending.length <= 1) setSheet(null)
+            if (hwPending.length <= 1) setSheet(null)
         }}
         onClose={() => setSheet(null)}
       />

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { openExternal } from '../lib/external.ts'
 import { APP_VERSION, openUpdate } from '../lib/update.ts'
 import type { UpdateInfo } from '../lib/update.ts'
 import { Icon } from './ui.tsx'
@@ -44,6 +45,15 @@ export function AboutPanel({ onCheck }: { onCheck: () => Promise<{ error: string
         <Icon name="cloud" size={22} /> عن التطبيق
       </h3>
       <div className="bold">النسخة {APP_VERSION}</div>
+      <div className="report" style={{ lineHeight: 1.8 }}>
+        <b>المطوّر:</b> Tarek Nahas
+        <br />
+        <b>الإيميل:</b> tareknahas@live.com
+      </div>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <button type="button" className="btn small" onClick={() => openExternal('https://github.com/tareknahas85-star')}>GitHub</button>
+        <button type="button" className="btn small" onClick={() => openExternal('mailto:tareknahas@live.com')}>راسلني</button>
+      </div>
       <button
         type="button"
         className="btn"

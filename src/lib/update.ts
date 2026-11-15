@@ -5,6 +5,9 @@ declare const __APP_VERSION__: string
 export const REPO = 'tareknahas85-star/studybuddy'
 export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0'
 
+import { Capacitor } from '@capacitor/core'
+import { Browser } from '@capacitor/browser'
+
 const KEY = 'sb.update.v1'
 const EVERY_MS = 12 * 3600 * 1000
 
@@ -120,7 +123,11 @@ export function updateLater(version: string): void {
   save({ ...load(), later: version, laterAt: Date.now() })
 }
 
-/** بيفتح تنزيل الـAPK بمتصفح الجهاز (أندرويد بيعرض التثبيت فوق النسخة الموجودة). */
+/** بيفتح تنزيل الـAPK بالمتصفح الخارجي للتلفون (داخل التطبيق ما بينفتح تنزيل). أندرويد بيحمّل وبيعرض شاشة التثبيت. */
 export function openUpdate(info: UpdateInfo): void {
+  if (Capacitor.isNativePlatform()) {
+    void Browser.open({ url: info.apk })
+    return
+  }
   window.open(info.apk, '_blank', 'noopener')
 }

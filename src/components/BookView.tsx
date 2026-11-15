@@ -8,6 +8,7 @@ import { stickerSvg } from '../lib/rewards.ts'
 import type { Lesson, Memory, SignalKind, Student } from '../lib/store.ts'
 import { uid } from '../lib/store.ts'
 import { AR, Companion, Icon, Sheet, Sticker } from './ui.tsx'
+import { AskBookSheet } from './LessonExtras.tsx'
 
 interface ShotState {
   id: string
@@ -46,6 +47,7 @@ export default function BookView(p: Props) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [confirm, setConfirm] = useState<string | null>(null)
+  const [askOpen, setAskOpen] = useState(false)
   const shotRef = useRef<ShotState | null>(null)
 
   useEffect(() => {
@@ -146,6 +148,21 @@ export default function BookView(p: Props) {
             <button type="button" className="btn small" onClick={p.onDecorate}>
               <Icon name="brush" size={20} /> زيّن الغلاف
             </button>
+          )}
+          {book.id !== '' && apiKey.trim() !== '' && lessons.length > 0 && (
+            <button type="button" className="btn small" onClick={() => setAskOpen(true)}>
+              <Icon name="smile" size={20} /> اسأل الكتاب
+            </button>
+          )}
+          {askOpen && (
+            <AskBookSheet
+              student={student}
+              memory={memory}
+              apiKey={apiKey}
+              bookTitle={book.title}
+              pages={lessons.map((l) => ({ title: l.title, facts: [l.summary, ...l.steps].filter((x) => x !== '').join(' ') }))}
+              onClose={() => setAskOpen(false)}
+            />
           )}
         </div>
 

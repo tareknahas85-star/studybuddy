@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { reexplain } from '../lib/ai.ts'
+import { reexplain, storyFromLesson } from '../lib/ai.ts'
+import { PodcastSheet } from './LessonExtras.tsx'
 import { COMPS } from '../lib/companions.ts'
 import type { CompMood } from '../lib/companions.ts'
 import type { Lesson, Memory, ReviewSeed, SignalKind, Student } from '../lib/store.ts'
@@ -57,6 +58,10 @@ export default function LessonPlayer(p: Props) {
   const [flip, setFlip] = useState(false)
   const [showPage, setShowPage] = useState(false)
   const [chat, setChat] = useState(false)
+  const [pod, setPod] = useState(false)
+  const [story, setStory] = useState('')
+  const [storyBusy, setStoryBusy] = useState(false)
+  const [storyErr, setStoryErr] = useState('')
   const [result, setResult] = useState<FinishInfo | null>(null)
   const last = useRef(Date.now())
   const activeRef = useRef(0)
@@ -194,6 +199,39 @@ export default function LessonPlayer(p: Props) {
               {comp.lines.rest}
             </div>
           )}
+          {apiKey.trim() !== '' && (story !== '' ? (
+            <div className="why" style={{ maxWidth: 320 }}>
+              {story}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn small"
+              disabled={storyBusy}
+              onClick={() => {
+                setStoryBusy(true)
+                setStoryErr('')
+                void storyFromLesson({
+                  apiKey,
+                  settings: { grade: student.grade, comp: student.comp, name: student.name },
+                  memory,
+                  lessonTitle: lesson.title,
+                  facts: [lesson.summary, ...lesson.steps].filter((x) => x !== '').join(' '),
+                }).then((r) => {
+                  setStoryBusy(false)
+                  if (r.ok) setStory(r.data)
+                  else setStoryErr(r.error)
+                })
+              }}
+            >
+              {storyBusy ? '…' : 'احكيلي قصة من الدرس'}
+            </button>
+          ))}
+          {storyErr && (
+            <p className="error" role="alert">
+              {storyErr}
+            </p>
+          )}
           <button type="button" className="btn yellow" style={{ minWidth: 240 }} onClick={result.fresh && result.sticker ? p.onAlbum : p.onBack}>
             {result.fresh && result.sticker ? 'لزّقو بالألبوم' : 'رجوع'}
           </button>
@@ -232,6 +270,11 @@ export default function LessonPlayer(p: Props) {
         </div>
         <SpeakButton key="intro" text={spoken} apiKey={apiKey} voice={student.voice} name={comp.name} onPlay={() => p.onSignal('voice')} />
         {chatBtn}
+        {apiKey.trim() !== '' && (
+          <button type="button" className="btn small" onClick={() => setPod(true)}>
+            <Icon name="speaker" size={20} /> بودكاست الدرس
+          </button>
+        )}
         {lesson.imageId !== '' && (
           <div className="stack" style={{ gap: 8 }}>
             <button type="button" className="btn small" onClick={() => setShowPage(!showPage)}>
@@ -401,6 +444,16 @@ export default function LessonPlayer(p: Props) {
       </div>
       {chat && (
         <LessonChat student={student} memory={memory} lesson={lesson} apiKey={apiKey} onClose={() => setChat(false)} onVoiceUse={() => p.onSignal('voice')} />
+      )}
+      {pod && (
+        <PodcastSheet
+          student={student}
+          memory={memory}
+          apiKey={apiKey}
+          lessonTitle={lesson.title}
+          facts={[lesson.summary, ...lesson.steps].filter((x) => x !== '').join(' ')}
+          onClose={() => setPod(false)}
+        />
       )}
     </main>
   )
