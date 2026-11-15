@@ -411,12 +411,14 @@ function CloudSection(p: Pick<Props, 'cloud' | 'cloudErr' | 'deviceMode' | 'onCo
             </button>
             {pairText !== '' && (
               <>
-                <textarea className="input ltr area" readOnly value={pairText} aria-label="كود الربط" onFocus={(e) => e.currentTarget.select()} />
+                <div className="pair-code" aria-label="كود الربط" onClick={() => void navigator.clipboard?.writeText(pairText)}>
+                  {pairText}
+                </div>
                 <button type="button" className="btn small" onClick={() => void navigator.clipboard?.writeText(pairText)}>
                   <Icon name="copy" size={20} /> انسخ الكود
                 </button>
                 <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-                  الصقو بجهاز الطالب من «اربط بجهاز الأهل». صالح ١٠ دقايق.
+                  اكتبو بجهاز الطالب من «ربط الأهل مع الطالب». صالح ١٠ دقايق.
                 </p>
               </>
             )}
@@ -427,12 +429,15 @@ function CloudSection(p: Pick<Props, 'cloud' | 'cloudErr' | 'deviceMode' | 'onCo
         ) : (
           <>
             <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
-              الصق إعدادات مشروع Firebase (firebaseConfig)، وسجّل دخول بإيميلك. أول مرة بينعمل الحساب.
+              سجّل دخول بإيميلك وكلمة سر. أول مرة بينعمل الحساب. بعدين اعمل كود ربط لجهاز الطالب.
             </p>
-            <textarea className="input ltr area" value={cfg} onChange={(e) => setCfg(e.target.value)} placeholder={'{ apiKey: "...", projectId: "...", appId: "..." }'} />
+            <details>
+              <summary className="muted bold" style={{ cursor: 'pointer' }}>مشروع Firebase خاص (متقدم)</summary>
+              <textarea className="input ltr area" value={cfg} onChange={(e) => setCfg(e.target.value)} placeholder={'{ apiKey: "...", projectId: "...", appId: "..." }'} />
+            </details>
             <input className="input ltr" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" autoComplete="off" />
             <input className="input ltr" type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="كلمة السر (٦ خانات على الأقل)" autoComplete="off" />
-            <button type="button" className="btn yellow" disabled={busy || cfg.trim() === '' || email.trim() === '' || pass.length < 6} onClick={() => void run(() => p.onConnect(cfg, email.trim(), pass))}>
+            <button type="button" className="btn yellow" disabled={busy || email.trim() === '' || pass.length < 6} onClick={() => void run(() => p.onConnect(cfg, email.trim(), pass))}>
               {busy ? '…' : 'سجّل دخول'}
             </button>
           </>
@@ -447,9 +452,18 @@ function CloudSection(p: Pick<Props, 'cloud' | 'cloudErr' | 'deviceMode' | 'onCo
       ) : (
         <>
           <p className="muted bold" style={{ margin: 0, lineHeight: 1.7 }}>
-            الصق كود الربط اللي طلع بجهاز الأهل، لتوصل التقارير والواجبات.
+            اكتب الكود اللي طلع بجهاز الأهل (٨ خانات). صالح ١٠ دقايق.
           </p>
-          <textarea className="input ltr area" value={joinText} onChange={(e) => setJoinText(e.target.value)} placeholder="SB1...." />
+          <input
+            className="input ltr"
+            value={joinText}
+            onChange={(e) => setJoinText(e.target.value.toUpperCase())}
+            placeholder="K7P3QX9D"
+            maxLength={20}
+            autoCapitalize="characters"
+            autoComplete="off"
+            aria-label="كود الربط"
+          />
           <button type="button" className="btn yellow" disabled={busy || joinText.trim() === ''} onClick={() => void run(() => p.onJoin(joinText))}>
             {busy ? '…' : 'اربط'}
           </button>

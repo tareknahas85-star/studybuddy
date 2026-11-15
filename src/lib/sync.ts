@@ -10,6 +10,19 @@ import type { SkinId } from './rewards.ts'
 
 export type FbConfig = Record<string, string>
 
+/** مشروع Firebase المدمج: كل الأجهزة بتستعملو، فالأهل ما بيلصقو إعدادات. القيم عامة وآمنة، والحماية بقواعد Firestore. */
+export const BUILT_IN_CONFIG: FbConfig = {
+  apiKey: 'AIzaSyBtD4sS8Lg0SFeoiTAYb37x-WgXvfOes2s',
+  authDomain: 'studybuddy-family.firebaseapp.com',
+  projectId: 'studybuddy-family',
+  storageBucket: 'studybuddy-family.firebasestorage.app',
+  messagingSenderId: '94193161781',
+  appId: '1:94193161781:web:475f07e6097273d81ec37c',
+}
+
+/** الكود القصير اللي بيكتبو الطالب: ٨ خانات بالحروف الكبيرة والأرقام (بدون حروف متشابهة). */
+export const SHORT_CODE = /^[A-Z2-9]{8}$/
+
 export interface CloudState {
   config: FbConfig | null
   fid: string
@@ -137,7 +150,7 @@ export async function connectParent(config: FbConfig, email: string, password: s
   }
 }
 
-/** كود الربط: نص واحد بينلصق على جهاز الطالب (إعدادات المشروع + كود لمرة وحدة). */
+/** كود الربط: ٨ خانات بتكفي جهاز الطالب (المشروع مدمج بالتطبيق). صالح ١٠ دقايق ومرة وحدة. */
 export async function createPairing(state: CloudState): Promise<CloudResult<string>> {
   if (!state.config || state.role !== 'parent') return { ok: false, error: 'سجّل دخول الأهل أول.' }
   try {
@@ -145,16 +158,28 @@ export async function createPairing(state: CloudState): Promise<CloudResult<stri
     const { doc, setDoc, Timestamp } = await import('firebase/firestore')
     const code = newCode()
     await setDoc(doc(db, 'pairings', code), { fid: state.fid, exp: Timestamp.fromMillis(Date.now() + 10 * 60 * 1000) })
-    return { ok: true, data: `SB1.${encodeURIComponent(JSON.stringify({ c: state.config, k: code }))}` }
+    // الكود القصير بس لو المشروع المدمج، وإلا بنرجع للكود الطويل (مشروع الأهل الخاص).
+    const usesBuiltIn = JSON.stringify(state.config) === JSON.stringify(BUILT_IN_CONFIG)
+    return { ok: true, data: usesBuiltIn ? code : `SB1.${encodeURIComponent(JSON.stringify({ c: state.config, k: code }))}` }
   } catch (e) {
     return { ok: false, error: explain(e) }
   }
+}
+
+/** الأهل بيدخلو على المشروع المدمج بإيميل وكلمة سر بس. */
+export async function connectBuiltIn(email: string, password: string): Promise<CloudResult<CloudState>> {
+  return connectParent(BUILT_IN_CONFIG, email, password)
 }
 
 /** جهاز الطالب: بيلصق كود الربط ويصير جهاز مسجّل بالعيلة. */
 export async function joinWithString(text: string): Promise<CloudResult<CloudState>> {
   let config: FbConfig
   let code: string
+  const short = text.trim().toUpperCase().replace(/[\s-]/g, '')
+  if (SHORT_CODE.test(short)) {
+    // كود قصير: بيفتح عيلة الأهل على المشروع المدمج، وبيكمّل نفس الخطوات.
+    return joinWithCode(BUILT_IN_CONFIG, short)
+  }
   try {
     const trimmed = text.trim()
     if (!trimmed.startsWith('SB1.')) throw new Error('format')
@@ -165,6 +190,10 @@ export async function joinWithString(text: string): Promise<CloudResult<CloudSta
   } catch {
     return { ok: false, error: 'كود الربط مو صحيح. انسخو كامل من قسم الأهل.' }
   }
+  return joinWithCode(config, code)
+}
+
+async function joinWithCode(config: FbConfig, code: string): Promise<CloudResult<CloudState>> {
   try {
     const { auth, db } = await boot(config)
     const { signInAnonymously } = await import('firebase/auth')

@@ -68,6 +68,7 @@ import {
   watchSettings,
 } from './lib/sync.ts'
 import type { BookOp, CloudKid, CloudSettings, CloudState } from './lib/sync.ts'
+import { connectBuiltIn } from './lib/sync.ts'
 import { applyBackup, exportStudent, parseBackup } from './lib/backup.ts'
 import { checkUpdate, updateLater } from './lib/update.ts'
 import type { UpdateInfo } from './lib/update.ts'
@@ -618,6 +619,12 @@ export default function App() {
         void applyNotify(n)
       }}
       onConnect={async (text, email, pass) => {
+        if (text.trim() === '') {
+          const r = await connectBuiltIn(email, pass)
+          if (!r.ok) return r.error
+          setCloud(r.data)
+          return ''
+        }
         const cfg = parseConfig(text)
         if (!cfg) return 'ما قدرنا نقرا إعدادات Firebase. انسخ firebaseConfig كامل (apiKey وprojectId وappId).'
         const r = await connectParent(cfg, email, pass)
